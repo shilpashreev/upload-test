@@ -74,42 +74,75 @@ jobs:
             <style>
               body { font-family: Arial, sans-serif; margin: 40px; }
               h1 { text-align: center; }
+              .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; max-width: 1000px; margin: 0 auto; }
               canvas { max-width: 600px; margin: 0 auto; display: block; }
+              table { width:100%; border-collapse: collapse; }
+              th, td { border: 1px solid #ddd; padding: 8px; text-align:left; }
+              th { background:#f6f6f6; }
             </style>
           </head>
           <body>
             <h1>Test Results Dashboard</h1>
-            <canvas id="resultsChart"></canvas>
+            <div class="grid">
+              <canvas id="resultsChart"></canvas>
+              <div>
+                <h3>Summary</h3>
+                <table>
+                  <tbody id="summaryRows"></tbody>
+                </table>
+              </div>
+            </div>
 
             <script>
               async function loadAndVisualize() {
-                const response = await fetch('test-results.xml');
-                const xmlText = await response.text();
-                const parser = new DOMParser();
-                const xmlDoc = parser.parseFromString(xmlText, 'application/xml');
-                
-                const testcases = Array.from(xmlDoc.getElementsByTagName('testcase'));
-                const names = testcases.map(tc => tc.getAttribute('name'));
-                const results = testcases.map(tc => tc.getAttribute('result'));
+                const res = await fetch('test-results.xml');
+                const xml = await res.text();
+                const doc = new DOMParser().parseFromString(xml, 'application/xml');
 
-                const passCount = results.filter(r => r === 'passed').length;
-                const failCount = results.filter(r => r === 'failed').length;
+                // Prefer the first <testsuite> summary row
+                const suite = doc.getElementsByTagName('testsuite')[0] || doc.getElementsByTagName('testsuites')[0];
+                if (!suite) {
+                  console.error('No <testsuite(s)> found'); return;
+                }
 
+                // Pull counts from attributes (strings -> numbers)
+                const toNum = (v) => Number(v || 0);
+                const tests    = toNum(suite.getAttribute('tests'));
+                const failures = toNum(suite.getAttribute('failures'));
+                const errors   = toNum(suite.getAttribute('errors'));
+                const skipped  = toNum(suite.getAttribute('skipped'));
+                const passed   = Math.max(0, tests - failures - errors - skipped);
+
+                // Fill summary table
+                const rows = [
+                  ['Total', tests],
+                  ['Passed', passed],
+                  ['Failed', failures],
+                  ['Errors', errors],
+                  ['Skipped', skipped],
+                ];
+                document.getElementById('summaryRows').innerHTML =
+                  rows.map(([k,v]) => `<tr><th>${k}</th><td>${v}</td></tr>`).join('');
+
+                // Draw bar chart
                 const ctx = document.getElementById('resultsChart');
                 new Chart(ctx, {
                   type: 'bar',
                   data: {
-                    labels: ['Passed', 'Failed'],
+                    labels: ['Passed', 'Failed', 'Errors', 'Skipped'],
                     datasets: [{
                       label: 'Test Results',
-                      data: [passCount, failCount],
-                      backgroundColor: ['#4CAF50', '#F44336']
+                      data: [passed, failures, errors, skipped]
                     }]
                   },
                   options: {
                     responsive: true,
                     scales: {
-                      y: { beginAtZero: true, precision: 0 }
+                      y: { beginAtZero: true, ticks: { precision: 0 } }
+                    },
+                    plugins: {
+                      legend: { display: false },
+                      title: { display: true, text: 'Results from test-results.xml' }
                     }
                   }
                 });
